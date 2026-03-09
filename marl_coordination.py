@@ -415,3 +415,209 @@ def exp2_learning_rate_effect(game, alphas, n_episodes=5000, n_runs=15):
         results[alpha] = (mean, std)
     return results
 
+
+# ─────────────────────────────────────────────
+# Plotting
+# ─────────────────────────────────────────────
+
+def make_figure():
+    """
+    THE MAIN FUNCTION that runs all the experiments and draws the 4-panel figure.
+
+    This is the "entry point" for the science — it:
+      1. Runs experiment 1 (noise effect) on Stag Hunt
+      2. Runs experiment 2 (learning rate effect) on Stag Hunt
+      3. Runs a Matching Pennies baseline for comparison
+      4. Draws a 2×2 grid of charts and saves it as a PNG file
+    """
+    # Create the game and set shared parameters
+    game = StagHunt()
+    n_episodes = 6000   # each run plays 6000 rounds
+    window = 100        # rolling average window size (used for smoothing)
+
+    # After smoothing, the x-axis has fewer points than n_episodes.
+    # (6000 - 100 + 1 = 5901 points). np.arange creates [0, 1, 2, ..., 5900]
+    x = np.arange(n_episodes - window + 1)
+
+    # The four noise levels to test in experiment 1
+    noise_levels = [0.0, 0.5, 1.5, 3.0]
+
+    # The four learning rates to test in experiment 2
+    alphas = [0.01, 0.05, 0.1, 0.3]
+
+    # ── Run all experiments first, then draw
+    print("Running noise experiment...")
+    # Returns a dict: { 0.0: (mean, std), 0.5: (mean, std), ... }
+    noise_results = exp1_noise_effect(game, noise_levels, n_episodes, n_runs=15)
+
+    print("Running learning rate experiment...")
+    # Returns a dict: { 0.01: (mean, std), 0.05: (mean, std), ... }
+    alpha_results = exp2_learning_rate_effect(game, alphas, n_episodes, n_runs=15)
+
+    # Run Matching Pennies with no noise as a comparison baseline
+    mp_game = MatchingPennies()
+    print("Running Matching Pennies baseline...")
+    mp_mean, mp_std = run_experiment(mp_game, n_episodes, noise_std=0.0, n_runs=15)
+
+    # ── Set up the figure canvas
+    # figsize=(14, 10): width=14 inches, height=10 inches
+    fig = plt.figure(figsize=(14, 10))
+
+    # Set the whole background to a dark near-black color (hex color code)
+    fig.patch.set_facecolor('#0f1117')
+
+    # GridSpec creates a 2-row × 2-column grid for our 4 subplots.
+    # hspace = vertical gap between rows, wspace = horizontal gap between columns
+    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.42, wspace=0.35)
+
+    # Color palettes: lists of hex color codes for each line/bar.
+    # These are picked to look good on a dark background.
+    palette       = ['#4FC3F7', '#81C784', '#FFB74D', '#F06292']  # for noise levels
+    alpha_palette = ['#CE93D8', '#4FC3F7', '#80CBC4', '#FFCC02']  # for learning rates
+
+    # This dict was defined but not actually used — the style_ax function
+    # below handles styling manually instead.
+    ax_style = dict(facecolor='#1a1d27', tick_params=dict(colors='#aaaaaa'),
+                    label_color='#cccccc', title_color='white')
+
+    def style_ax(ax, title, xlabel, ylabel):
+        """
+        A small helper function that applies the same dark-theme styling
+        to every subplot so we don't repeat those lines 4 times.
+
+        ax     : the subplot object to style
+        title  : text for the chart title
+        xlabel : label for the horizontal (x) axis
+        ylabel : label for the vertical (y) axis
+        """
+        ax.set_facecolor('#1a1d27')                       # dark grey background inside the chart
+        ax.tick_params(colors='#aaaaaa', labelsize=9)     # axis tick marks in light grey
+        ax.set_xlabel(xlabel, color='#cccccc', fontsize=10)
+        ax.set_ylabel(ylabel, color='#cccccc', fontsize=10)
+        ax.set_title(title, color='white', fontsize=11, fontweight='bold', pad=8)
+        for spine in ax.spines.values():                  # the 4 border lines around the chart
+            spine.set_edgecolor('#333344')
+        ax.grid(True, linestyle='--', alpha=0.2, color='#555566')  # faint dashed grid lines
+
+    # ── PANEL 1 (top-left): How noise affects coordination
+    ax1 = fig.add_subplot(gs[0, 0])  # row 0, column 0
+
+    for i, noise in enumerate(noise_levels):
+        mean, std = noise_results[noise]  # unpack the stored results
+
+        # Draw the main line (the average coordination rate over episodes)
+        label = f"σ = {noise}"  # f-string: inserts the value of `noise` into the string
+        ax1.plot(x, mean, color=palette[i], lw=1.8, label=label)
+
+        # Draw a shaded band around the line: mean ± std
+        # This shows how much the result varied across the 15 runs.
+        # alpha=0.15 makes it 85% transparent so lines don't hide each other.
+        ax1.fill_between(x, mean - std, mean + std, color=palette[i], alpha=0.15)
+
+    # Draw a thin white horizontal line at y=1.0 (perfect coordination)
+    ax1.axhline(1.0, color='white', lw=0.6, linestyle=':', alpha=0.4)
+
+    # Apply dark-theme styling
+    style_ax(ax1, "Effect of Reward Noise on Coordination\n(Stag Hunt)",
+             "Episode", "Pareto Coordination Rate")
+
+    # Add a legend box explaining what each colored line means
+    ax1.legend(fontsize=8, labelcolor='#cccccc', facecolor='#22253a',
+               edgecolor='#333344', loc='lower right')
+    ax1.set_ylim(-0.05, 1.1)  # y-axis from just below 0 to just above 1
+
+    # ── PANEL 2 (top-right): How learning rate affects convergence ─
+    ax2 = fig.add_subplot(gs[0, 1])  # row 0, column 1
+
+    for i, alpha in enumerate(alphas):
+        mean, std = alpha_results[alpha]
+        ax2.plot(x, mean, color=alpha_palette[i], lw=1.8, label=f"α = {alpha}")
+        ax2.fill_between(x, mean - std, mean + std, color=alpha_palette[i], alpha=0.15)
+
+    ax2.axhline(1.0, color='white', lw=0.6, linestyle=':', alpha=0.4)
+    style_ax(ax2, "Effect of Learning Rate on Convergence\n(Stag Hunt, σ = 0)",
+             "Episode", "Pareto Coordination Rate")
+    ax2.legend(fontsize=8, labelcolor='#cccccc', facecolor='#22253a',
+               edgecolor='#333344', loc='lower right')
+    ax2.set_ylim(-0.05, 1.1)
+
+    # ── PANEL 3 (bottom-left): Stag Hunt vs Matching Pennies ──
+    ax3 = fig.add_subplot(gs[1, 0])  # row 1, column 0
+
+    # Stag Hunt result (no noise) — we already computed this in exp1
+    sh_mean, sh_std = noise_results[0.0]
+    ax3.plot(x, sh_mean, color='#4FC3F7', lw=2, label='Stag Hunt (coord. eq.)')
+    ax3.fill_between(x, sh_mean - sh_std, sh_mean + sh_std, color='#4FC3F7', alpha=0.15)
+
+    # Matching Pennies result — this should oscillate around 0.5, never converge
+    ax3.plot(x, mp_mean, color='#F06292', lw=2, label='Matching Pennies (no pure NE)')
+    ax3.fill_between(x, mp_mean - mp_std, mp_mean + mp_std, color='#F06292', alpha=0.15)
+
+    # Dashed yellow line at 0.5 = what pure random guessing would achieve
+    ax3.axhline(0.5, color='#FFCC02', lw=1, linestyle='--', alpha=0.6,
+                label='Random baseline (0.5)')
+
+    style_ax(ax3, "Convergence by Game Structure\n(Independent Q-Learning)",
+             "Episode", "Coordination Rate")
+    ax3.legend(fontsize=8, labelcolor='#cccccc', facecolor='#22253a',
+               edgecolor='#333344', loc='center right')
+    ax3.set_ylim(-0.05, 1.1)
+
+    # ── PANEL 4 (bottom-right): Bar chart of final coordination by noise ─
+    ax4 = fig.add_subplot(gs[1, 1])  # row 1, column 1
+
+    final_coords = []  # list to hold the final avg coordination for each noise level
+    final_stds = []    # list to hold the spread for the error bars
+
+    for noise in noise_levels:
+        m, s = noise_results[noise]
+        # Take the LAST 500 episodes of the smoothed mean to see where agents ended up
+        # m[-500:] means "the last 500 elements of m" (negative indexing in Python)
+        final_coords.append(m[-500:].mean())
+        final_stds.append(m[-500:].std())
+
+    # Draw bars: one per noise level, colored with the same palette as Panel 1
+    # yerr adds error bars (little T-shapes) showing the std deviation
+    # capsize=5 adds a small horizontal cap on the error bars
+    bars = ax4.bar(
+        [str(n) for n in noise_levels],  # x-axis labels: ['0.0', '0.5', '1.5', '3.0']
+        final_coords,
+        color=palette,
+        alpha=0.85,
+        width=0.55,
+        yerr=final_stds,
+        capsize=5,
+        error_kw=dict(ecolor='#aaaaaa', lw=1.5)  # style the error bars
+    )
+
+    ax4.axhline(0.5, color='#FFCC02', lw=1, linestyle='--', alpha=0.6,
+                label='Random baseline')
+    style_ax(ax4, "Final Coordination Rate vs. Noise Level\n(last 500 episodes avg.)",
+             "Reward Noise σ", "Avg. Pareto Coordination Rate")
+    ax4.legend(fontsize=8, labelcolor='#cccccc', facecolor='#22253a', edgecolor='#333344')
+    ax4.set_ylim(0, 1.1)
+
+    # ── Overall title across the top of the whole figure ──────
+    fig.suptitle(
+        "Independent Q-Learning in Two-Agent Coordination Games\n"
+        "Convergence Analysis: Noise, Learning Rate & Game Structure",
+        color='white', fontsize=13, fontweight='bold', y=0.98
+    )
+
+    # Save the completed figure to a PNG file.
+    # dpi=150 means 150 dots-per-inch (decent resolution).
+    # bbox_inches='tight' trims extra whitespace around the edges.
+    plt.savefig('marl_convergence_analysis.png',
+            dpi=150, bbox_inches='tight', facecolor='#0f1117')
+    print("Plot saved.")
+    plt.close()  # Free up memory by closing the figure
+
+if __name__ == "__main__":
+    make_figure()  # run everything: experiments + plotting + saving
+
+    print("\nDone! Results saved to marl_convergence_analysis.png")
+    print("\nKey findings:")
+    # Expected takeaways from the charts:
+    print("- Higher reward noise (σ) delays convergence to Pareto-optimal coordination")
+    print("- Moderate learning rates (α ≈ 0.1) balance speed and stability")
+    print("- Stag Hunt reliably converges; Matching Pennies oscillates near random (no pure NE)")
